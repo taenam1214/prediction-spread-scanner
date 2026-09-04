@@ -9,6 +9,7 @@ import {
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
 import { runBacktest } from "./backtest";
+import { getSystemStats } from "./stats";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -108,6 +109,11 @@ export function registerRoutes(app: FastifyInstance): void {
       })
     );
     return { spreads };
+  });
+
+  // System stats
+  app.get("/api/stats", async () => {
+    return await getSystemStats();
   });
 
   // Run backtest
