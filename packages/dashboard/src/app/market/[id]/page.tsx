@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { PriceChart } from "@/components/PriceChart";
+import { SpreadAreaChart } from "@/components/SpreadAreaChart";
 import {
   getMarketHistory,
   getOpportunities,
@@ -93,6 +94,19 @@ export default function MarketDetailPage() {
             Price History
           </h2>
           <PriceChart history={history} />
+
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "var(--text-secondary)",
+              marginTop: 24,
+              marginBottom: 12,
+            }}
+          >
+            Spread Over Time
+          </h2>
+          <SpreadAreaChart history={history} />
 
           <h2
             style={{
