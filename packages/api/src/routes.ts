@@ -1,0 +1,111 @@
+import type { FastifyInstance } from "fastify";
+import {
+  getActiveMarketPairs,
+  getMarketPairById,
+  getOpportunities,
+  getPriceHistory,
+  getResolutions,
+} from "@spread-scanner/db";
+import { REDIS_KEYS } from "@spread-scanner/schemas";
+import Redis from "ioredis";
+
+const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+
+export function registerRoutes(app: FastifyInstance): void {
+  // Health check
+  app.get("/health", async () => ({ status: "ok", timestamp: new Date().toISOString() }));
+
+  // List all active market pairs with latest spread data
+  app.get("/api/markets", async () => {
+    const pairs = await getActiveMarketPairs();
+
+    // Enrich with latest spread from Redis
+    const enriched = await Promise.all(
+      pairs.map(async (pair) => {
+        const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
+        const latestSpread = spreadStr ? JSON.parse(spreadStr) : null;
+
+        const polyStr = await redis.get(
+          REDIS_KEYS.latestPrice("polymarket", pair.id)
+        );
+        const kalshiStr = await redis.get(
+          REDIS_KEYS.latestPrice("kalshi", pair.id)
+        );
+
+        return {
+          ...pair,
+          latestSpread,
+          polymarketPrice: polyStr ? JSON.parse(polyStr) : null,
+          kalshiPrice: kalshiStr ? JSON.parse(kalshiStr) : null,
+        };
+      })
+    );
+
+    return { markets: enriched };
+  });
+
+  // Get single market pair detail
+  app.get<{ Params: { id: string } }>("/api/markets/:id", async (req, reply) => {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+    const pair = await getMarketPairById(id);
+    if (!pair) return reply.status(404).send({ error: "Market pair not found" });
+
+    const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
+    const latestSpread = spreadStr ? JSON.parse(spreadStr) : null;
+
+    return { market: pair, latestSpread };
+  });
+
+  // Get price history for a market pair
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/api/markets/:id/history",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const limit = parseInt(req.query.limit ?? "500", 10);
+      const history = await getPriceHistory(id, Math.min(limit, 2000));
+
+      return { marketPairId: id, history };
+    }
+  );
+
+  // List opportunities
+  app.get<{ Querystring: { limit?: string; open?: string } }>(
+    "/api/opportunities",
+    async (req) => {
+      const limit = parseInt(req.query.limit ?? "50", 10);
+      const onlyOpen = req.query.open === "true";
+      const opportunities = await getOpportunities(
+        Math.min(limit, 200),
+        onlyOpen
+      );
+      return { opportunities };
+    }
+  );
+
+  // List resolutions
+  app.get("/api/resolutions", async () => {
+    const resolutions = await getResolutions();
+    return { resolutions };
+  });
+
+  // Get latest spreads for all markets (from Redis cache)
+  app.get("/api/spreads", async () => {
+    const pairs = await getActiveMarketPairs();
+    const spreads = await Promise.all(
+      pairs.map(async (pair) => {
+        const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
+        return {
+          marketPairId: pair.id,
+          label: pair.label,
+          category: pair.category,
+          spread: spreadStr ? JSON.parse(spreadStr) : null,
+        };
+      })
+    );
+    return { spreads };
+  });
+}
