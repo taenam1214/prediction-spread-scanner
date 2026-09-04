@@ -1,0 +1,13 @@
+{
+  "name": "@spread-scanner/kafka",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "kafkajs": "^2.2.4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "prediction-spread-scanner",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "shared/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --build",
+    "clean": "rm -rf packages/*/dist shared/*/dist"
+  }
+}
