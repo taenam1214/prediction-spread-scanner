@@ -1,0 +1,21 @@
+{
+  "name": "@spread-scanner/ingestion-polymarket",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@spread-scanner/schemas": "*",
+    "@spread-scanner/kafka": "*",
+    "@spread-scanner/db": "*",
+    "kafkajs": "^2.2.4",
+    "axios": "^1.7.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "@types/node": "^20.14.0"
+  }
+}
