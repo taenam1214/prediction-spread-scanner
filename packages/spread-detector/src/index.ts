@@ -1,0 +1,145 @@
+import { createConsumer, createProducer, ensureTopics, TOPICS } from "@spread-scanner/kafka";
+import { insertOpportunity, closeOpportunity } from "@spread-scanner/db";
+import type {
+  NormalizedPriceEvent,
+  Opportunity,
+  SpreadSnapshot,
+} from "@spread-scanner/schemas";
+import {
+  PLATFORM_FEES,
+  DEFAULT_SPREAD_THRESHOLD,
+  REDIS_KEYS,
+} from "@spread-scanner/schemas";
+import Redis from "ioredis";
+
+const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+const SPREAD_THRESHOLD = parseFloat(
+  process.env.SPREAD_THRESHOLD ?? `${DEFAULT_SPREAD_THRESHOLD}`
+);
+
+async function main(): Promise<void> {
+  console.log("[spread-detector] Starting...");
+  console.log(`[spread-detector] Threshold: ${(SPREAD_THRESHOLD * 100).toFixed(1)}%`);
+
+  await ensureTopics();
+  const producer = await createProducer();
+  const consumer = await createConsumer("spread-detector-group", [
+    TOPICS.NORMALIZED_PRICES,
+  ]);
+
+  console.log("[spread-detector] Consuming from normalized-prices topic...");
+
+  await consumer.run({
+    eachMessage: async ({ message }) => {
+      if (!message.value) return;
+
+      const event: NormalizedPriceEvent & { marketPairId: number } = JSON.parse(
+        message.value.toString()
+      );
+
+      try {
+        await detectSpread(event, producer);
+      } catch (err: any) {
+        console.error(
+          `[spread-detector] Error processing market ${event.marketPairId}: ${err.message}`
+        );
+      }
+    },
+  });
+}
+
+async function detectSpread(
+  event: NormalizedPriceEvent & { marketPairId: number },
+  producer: any
+): Promise<void> {
+  const { marketPairId, platform, impliedProbability } = event;
+
+  // Get the latest cached price from the OTHER platform
+  const otherPlatform = platform === "polymarket" ? "kalshi" : "polymarket";
+  const cachedStr = await redis.get(
+    REDIS_KEYS.latestPrice(otherPlatform, marketPairId)
+  );
+
+  if (!cachedStr) {
+    // No data from the other platform yet — nothing to compare
+    return;
+  }
+
+  const otherEvent: NormalizedPriceEvent = JSON.parse(cachedStr);
+
+  // Compute raw spread
+  const polyProb =
+    platform === "polymarket"
+      ? impliedProbability
+      : otherEvent.impliedProbability;
+  const kalshiProb =
+    platform === "kalshi"
+      ? impliedProbability
+      : otherEvent.impliedProbability;
+
+  const rawSpread = Math.abs(polyProb - kalshiProb);
+
+  // Compute fee-adjusted spread
+  // If buying the cheaper side, we pay taker fees on both platforms
+  const totalFees =
+    PLATFORM_FEES.polymarket.takerFee + PLATFORM_FEES.kalshi.takerFee;
+  const feeAdjustedSpread = rawSpread - totalFees;
+
+  // Cache latest spread in Redis for the dashboard
+  const snapshot: SpreadSnapshot = {
+    marketPairId,
+    polymarketProb: polyProb,
+    kalshiProb: kalshiProb,
+    spread: rawSpread,
+    feeAdjustedSpread,
+    timestamp: event.timestamp,
+  };
+  await redis.set(
+    REDIS_KEYS.latestSpread(marketPairId),
+    JSON.stringify(snapshot),
+    "EX",
+    300
+  );
+
+  if (feeAdjustedSpread >= SPREAD_THRESHOLD) {
+    // Opportunity detected
+    const opp: Opportunity = {
+      marketPairId,
+      detectedAt: event.timestamp,
+      polymarketProb: polyProb,
+      kalshiProb: kalshiProb,
+      spread: rawSpread,
+      feeAdjustedSpread,
+      stillOpen: true,
+    };
+
+    const oppId = await insertOpportunity(opp);
+    console.log(
+      `[spread-detector] OPPORTUNITY #${oppId}: market ${marketPairId} ` +
+        `spread=${(rawSpread * 100).toFixed(2)}% ` +
+        `fee-adjusted=${(feeAdjustedSpread * 100).toFixed(2)}% ` +
+        `(poly=${(polyProb * 100).toFixed(1)}% kalshi=${(kalshiProb * 100).toFixed(1)}%)`
+    );
+
+    // Publish to opportunities topic
+    await producer.send({
+      topic: TOPICS.OPPORTUNITIES,
+      messages: [
+        {
+          key: `${marketPairId}`,
+          value: JSON.stringify({ ...opp, id: oppId }),
+        },
+      ],
+    });
+  } else {
+    // If spread is below threshold, close any open opportunities for this pair
+    if (feeAdjustedSpread < SPREAD_THRESHOLD * 0.5) {
+      await closeOpportunity(marketPairId, event.timestamp);
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error("[spread-detector] Fatal error:", err);
+  process.exit(1);
+});
