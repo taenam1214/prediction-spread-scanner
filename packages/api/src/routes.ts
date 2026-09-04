@@ -8,6 +8,7 @@ import {
 } from "@spread-scanner/db";
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
+import { runBacktest } from "./backtest";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -108,4 +109,14 @@ export function registerRoutes(app: FastifyInstance): void {
     );
     return { spreads };
   });
+
+  // Run backtest
+  app.get<{ Querystring: { threshold?: string } }>(
+    "/api/backtest",
+    async (req) => {
+      const threshold = parseFloat(req.query.threshold ?? "0.03");
+      const result = await runBacktest(threshold);
+      return result;
+    }
+  );
 }
