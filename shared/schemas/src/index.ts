@@ -1,3 +1,5 @@
+export { loadConfig, type AppConfig } from "./config";
+
 // Shared type definitions for prediction spread scanner events
 
 export interface NormalizedPriceEvent {
