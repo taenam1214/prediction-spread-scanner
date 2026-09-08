@@ -16,6 +16,7 @@ import Redis from "ioredis";
 import { runBacktest } from "./backtest";
 import { getSystemStats } from "./stats";
 import { runSimulation, runBatchSimulation } from "./execution-sim";
+import { computeSpreadHalfLife, computeCalibration } from "./efficiency";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -225,6 +226,36 @@ export function registerRoutes(app: FastifyInstance): void {
       const results = await runBatchSimulation(id, platform);
 
       return { marketPairId: id, platform, results };
+    }
+  );
+
+  // Spread half-life for a market
+  app.get<{ Params: { id: string } }>(
+    "/api/analytics/half-life/:id",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const result = await computeSpreadHalfLife(id);
+      if (!result) {
+        return reply
+          .status(404)
+          .send({ error: "Not enough data to compute half-life" });
+      }
+
+      return result;
+    }
+  );
+
+  // Calibration curves
+  app.get<{ Querystring: { platform?: string } }>(
+    "/api/analytics/calibration",
+    async (req) => {
+      const platform = (req.query.platform ?? "polymarket") as
+        | "polymarket"
+        | "kalshi";
+      const result = await computeCalibration(platform);
+      return result;
     }
   );
 }
