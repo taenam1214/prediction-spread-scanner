@@ -15,6 +15,7 @@ import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
 import { runBacktest } from "./backtest";
 import { getSystemStats } from "./stats";
+import { runSimulation, runBatchSimulation } from "./execution-sim";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 
@@ -188,6 +189,42 @@ export function registerRoutes(app: FastifyInstance): void {
       const snapshots = await getLatestLiquidityByMarket(id);
 
       return { marketPairId: id, snapshots };
+    }
+  );
+
+  // Execution simulation for a market
+  app.get<{
+    Params: { id: string };
+    Querystring: { platform?: string; size?: string; latency?: string };
+  }>(
+    "/api/analytics/simulate/:id",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const platform = (req.query.platform ?? "polymarket") as "polymarket" | "kalshi";
+      const sizeUsd = parseFloat(req.query.size ?? "1000");
+      const latencyMs = parseFloat(req.query.latency ?? "200");
+
+      const result = await runSimulation(id, platform, sizeUsd, latencyMs);
+      return result;
+    }
+  );
+
+  // Batch simulation (matrix of sizes × latencies)
+  app.get<{
+    Params: { id: string };
+    Querystring: { platform?: string };
+  }>(
+    "/api/analytics/simulate/:id/batch",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const platform = (req.query.platform ?? "polymarket") as "polymarket" | "kalshi";
+      const results = await runBatchSimulation(id, platform);
+
+      return { marketPairId: id, platform, results };
     }
   );
 }
