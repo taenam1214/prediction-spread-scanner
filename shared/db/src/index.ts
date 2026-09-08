@@ -4,6 +4,9 @@ import type {
   NormalizedPriceEvent,
   Opportunity,
   Resolution,
+  LeadLagResult,
+  LiquiditySnapshot,
+  AnalyticsSummary,
 } from "@spread-scanner/schemas";
 
 const pool = new Pool({
@@ -163,6 +166,166 @@ export async function getResolutions(): Promise<any[]> {
     `SELECT r.*, mp.label FROM resolutions r JOIN market_pairs mp ON mp.id = r.market_pair_id ORDER BY r.resolved_at DESC`
   );
   return rows;
+}
+
+// --- Lead-Lag Results ---
+
+export async function insertLeadLagResult(
+  result: LeadLagResult
+): Promise<number> {
+  const { rows } = await pool.query(
+    `INSERT INTO lead_lag_results
+       (market_pair_id, window_start, window_end, leader, lag_ms,
+        correlation, sample_size, computed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+     RETURNING id`,
+    [
+      result.marketPairId,
+      result.windowStart,
+      result.windowEnd,
+      result.leader,
+      result.lagMs,
+      result.correlation,
+      result.sampleSize,
+      result.computedAt,
+    ]
+  );
+  return rows[0].id;
+}
+
+export async function getLeadLagResults(
+  marketPairId?: number,
+  limit = 50
+): Promise<any[]> {
+  if (marketPairId) {
+    const { rows } = await pool.query(
+      `SELECT ll.*, mp.label
+       FROM lead_lag_results ll
+       JOIN market_pairs mp ON mp.id = ll.market_pair_id
+       WHERE ll.market_pair_id = $1
+       ORDER BY ll.computed_at DESC
+       LIMIT $2`,
+      [marketPairId, limit]
+    );
+    return rows;
+  }
+  const { rows } = await pool.query(
+    `SELECT ll.*, mp.label
+     FROM lead_lag_results ll
+     JOIN market_pairs mp ON mp.id = ll.market_pair_id
+     ORDER BY ll.computed_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+export async function getLatestLeadLag(
+  marketPairId: number
+): Promise<any | null> {
+  const { rows } = await pool.query(
+    `SELECT ll.*, mp.label
+     FROM lead_lag_results ll
+     JOIN market_pairs mp ON mp.id = ll.market_pair_id
+     WHERE ll.market_pair_id = $1
+     ORDER BY ll.computed_at DESC
+     LIMIT 1`,
+    [marketPairId]
+  );
+  return rows.length > 0 ? rows[0] : null;
+}
+
+// --- Liquidity Snapshots ---
+
+export async function insertLiquiditySnapshot(
+  snapshot: LiquiditySnapshot
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO liquidity_snapshots
+       (market_pair_id, platform, spread_bps, depth_score, liquidity_index,
+        best_bid, best_ask, captured_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      snapshot.marketPairId,
+      snapshot.platform,
+      snapshot.spreadBps,
+      snapshot.depthScore,
+      snapshot.liquidityIndex,
+      snapshot.bestBid,
+      snapshot.bestAsk,
+      snapshot.capturedAt,
+    ]
+  );
+}
+
+export async function getLiquidityHistory(
+  marketPairId: number,
+  limit = 200
+): Promise<any[]> {
+  const { rows } = await pool.query(
+    `SELECT * FROM liquidity_snapshots
+     WHERE market_pair_id = $1
+     ORDER BY captured_at DESC
+     LIMIT $2`,
+    [marketPairId, limit]
+  );
+  return rows;
+}
+
+export async function getLatestLiquidityByMarket(
+  marketPairId: number
+): Promise<any[]> {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT ON (platform) *
+     FROM liquidity_snapshots
+     WHERE market_pair_id = $1
+     ORDER BY platform, captured_at DESC`,
+    [marketPairId]
+  );
+  return rows;
+}
+
+export async function getPriceSnapshotsInWindow(
+  marketPairId: number,
+  windowStart: string,
+  windowEnd: string
+): Promise<any[]> {
+  const { rows } = await pool.query(
+    `SELECT platform, implied_probability, captured_at
+     FROM price_snapshots
+     WHERE market_pair_id = $1
+       AND captured_at >= $2
+       AND captured_at <= $3
+     ORDER BY captured_at ASC`,
+    [marketPairId, windowStart, windowEnd]
+  );
+  return rows;
+}
+
+export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+  const { rows: llRows } = await pool.query(
+    `SELECT
+       COUNT(*)::int AS total_ll,
+       COALESCE(AVG(correlation), 0) AS avg_corr,
+       (SELECT leader FROM lead_lag_results
+        GROUP BY leader ORDER BY COUNT(*) DESC LIMIT 1) AS dominant
+     FROM lead_lag_results`
+  );
+
+  const { rows: liqRows } = await pool.query(
+    `SELECT
+       COUNT(*)::int AS total_liq,
+       COALESCE(AVG(liquidity_index), 0) AS avg_liq
+     FROM liquidity_snapshots`
+  );
+
+  return {
+    totalLeadLagComputations: llRows[0]?.total_ll ?? 0,
+    totalLiquiditySnapshots: liqRows[0]?.total_liq ?? 0,
+    avgCorrelation: parseFloat(llRows[0]?.avg_corr ?? "0"),
+    dominantLeader: llRows[0]?.dominant ?? null,
+    avgLiquidityIndex: parseFloat(liqRows[0]?.avg_liq ?? "0"),
+  };
 }
 
 // --- Helpers ---
