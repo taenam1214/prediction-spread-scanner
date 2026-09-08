@@ -150,6 +150,86 @@ async function main() {
   }
 
   console.log(`\nDone: ${snapshotCount} snapshots, ${opportunityCount} opportunities`);
+
+  // --- Seed Analytics Data ---
+
+  console.log("\nSeeding analytics data...");
+
+  let leadLagCount = 0;
+  let liquidityCount = 0;
+
+  // Seed lead-lag results (24h hourly)
+  for (const pair of pairs) {
+    for (let h = 0; h < 24; h++) {
+      const windowEnd = new Date(now - h * HOUR);
+      const windowStart = new Date(windowEnd.getTime() - HOUR);
+      const leader = Math.random() > 0.6 ? "polymarket" : "kalshi";
+      const lagMs = Math.floor(Math.random() * 10) * 30_000; // 0–5 minutes in 30s steps
+      const correlation = 0.5 + Math.random() * 0.45;
+      const sampleSize = 80 + Math.floor(Math.random() * 40);
+
+      await pool.query(
+        `INSERT INTO lead_lag_results
+           (market_pair_id, window_start, window_end, leader, lag_ms,
+            correlation, sample_size, computed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          pair.id,
+          windowStart.toISOString(),
+          windowEnd.toISOString(),
+          leader,
+          lagMs,
+          parseFloat(correlation.toFixed(4)),
+          sampleSize,
+          windowEnd.toISOString(),
+        ]
+      );
+      leadLagCount++;
+    }
+  }
+
+  console.log(`  Seeded ${leadLagCount} lead-lag results`);
+
+  // Seed liquidity snapshots (24h every 5min)
+  const liqIntervalMs = 5 * 60 * 1000; // 5 minutes
+  const liqStart = now - DAY;
+  const liqPoints = Math.floor(DAY / liqIntervalMs);
+
+  for (const pair of pairs) {
+    for (let i = 0; i < liqPoints; i++) {
+      const timestamp = new Date(liqStart + i * liqIntervalMs).toISOString();
+
+      for (const platform of ["polymarket", "kalshi"] as const) {
+        const spreadBps = 50 + Math.random() * 300; // 50–350 bps
+        const depthScore = 1 - Math.min(Math.max(spreadBps / 500, 0), 1);
+        const liquidityIndex = depthScore * 100;
+        const mid = 0.3 + Math.random() * 0.4;
+        const halfSpreadDecimal = spreadBps / 10_000 / 2;
+
+        await pool.query(
+          `INSERT INTO liquidity_snapshots
+             (market_pair_id, platform, spread_bps, depth_score, liquidity_index,
+              best_bid, best_ask, captured_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [
+            pair.id,
+            platform,
+            parseFloat(spreadBps.toFixed(2)),
+            parseFloat(depthScore.toFixed(4)),
+            parseFloat(liquidityIndex.toFixed(2)),
+            parseFloat(Math.max(0.01, mid - halfSpreadDecimal).toFixed(4)),
+            parseFloat(Math.min(0.99, mid + halfSpreadDecimal).toFixed(4)),
+            timestamp,
+          ]
+        );
+        liquidityCount++;
+      }
+    }
+    console.log(`  Seeded liquidity for ${pair.label}`);
+  }
+
+  console.log(`  Seeded ${liquidityCount} liquidity snapshots`);
+  console.log("\nAll seeding complete.");
   await pool.end();
 }
 
