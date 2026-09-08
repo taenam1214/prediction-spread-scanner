@@ -138,6 +138,24 @@ services:
       SPREAD_THRESHOLD: "0.03"
     restart: unless-stopped
 
+  analytics:
+    build:
+      context: .
+      dockerfile: packages/analytics/Dockerfile
+    container_name: analytics
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      DATABASE_URL: postgresql://scanner:scanner_dev_pw@postgres:5432/spread_scanner
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+
   api:
     build:
       context: .
