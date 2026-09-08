@@ -114,3 +114,152 @@ export function createSpreadWebSocket(
   };
   return ws;
 }
+
+// --- Analytics Types ---
+
+export interface AnalyticsSummary {
+  totalLeadLagComputations: number;
+  totalLiquiditySnapshots: number;
+  avgCorrelation: number;
+  dominantLeader: "polymarket" | "kalshi" | null;
+  avgLiquidityIndex: number;
+}
+
+export interface LeadLagRow {
+  id: number;
+  market_pair_id: number;
+  label: string;
+  window_start: string;
+  window_end: string;
+  leader: "polymarket" | "kalshi";
+  lag_ms: number;
+  correlation: number;
+  sample_size: number;
+  computed_at: string;
+}
+
+export interface LiquidityRow {
+  id: number;
+  market_pair_id: number;
+  platform: string;
+  spread_bps: number;
+  depth_score: number;
+  liquidity_index: number;
+  best_bid: number;
+  best_ask: number;
+  captured_at: string;
+}
+
+export interface ExecutionSimResult {
+  request: {
+    marketPairId: number;
+    platform: string;
+    sizeUsd: number;
+    latencyMs: number;
+  };
+  slippageBps: number;
+  latencyPenaltyBps: number;
+  totalCostBps: number;
+  effectiveSpread: number;
+  profitable: boolean;
+  expectedPnl: number;
+}
+
+export interface SpreadHalfLifeData {
+  marketPairId: number;
+  halfLifeMs: number;
+  lambda: number;
+  r2: number;
+  sampleSize: number;
+}
+
+export interface CalibrationBucket {
+  bucketStart: number;
+  bucketEnd: number;
+  avgPredicted: number;
+  avgActual: number;
+  count: number;
+}
+
+export interface CalibrationData {
+  platform: string;
+  brierScore: number;
+  buckets: CalibrationBucket[];
+  totalResolved: number;
+}
+
+// --- Analytics API Functions ---
+
+export async function getAnalyticsSummary(): Promise<AnalyticsSummary> {
+  return fetchJson<AnalyticsSummary>("/api/analytics/summary");
+}
+
+export async function getLeadLagResults(
+  limit = 50
+): Promise<LeadLagRow[]> {
+  const data = await fetchJson<{ results: LeadLagRow[] }>(
+    `/api/analytics/lead-lag?limit=${limit}`
+  );
+  return data.results;
+}
+
+export async function getLeadLagForMarket(
+  id: number,
+  limit = 50
+): Promise<{ latest: LeadLagRow | null; results: LeadLagRow[] }> {
+  return fetchJson(`/api/analytics/lead-lag/${id}?limit=${limit}`);
+}
+
+export async function getLiquidityHistory(
+  id: number,
+  limit = 200
+): Promise<LiquidityRow[]> {
+  const data = await fetchJson<{ history: LiquidityRow[] }>(
+    `/api/analytics/liquidity/${id}?limit=${limit}`
+  );
+  return data.history;
+}
+
+export async function getLatestLiquidity(
+  id: number
+): Promise<LiquidityRow[]> {
+  const data = await fetchJson<{ snapshots: LiquidityRow[] }>(
+    `/api/analytics/liquidity/${id}/latest`
+  );
+  return data.snapshots;
+}
+
+export async function simulateExecution(
+  id: number,
+  platform = "polymarket",
+  sizeUsd = 1000,
+  latencyMs = 200
+): Promise<ExecutionSimResult> {
+  return fetchJson<ExecutionSimResult>(
+    `/api/analytics/simulate/${id}?platform=${platform}&size=${sizeUsd}&latency=${latencyMs}`
+  );
+}
+
+export async function simulateExecutionBatch(
+  id: number,
+  platform = "polymarket"
+): Promise<ExecutionSimResult[]> {
+  const data = await fetchJson<{ results: ExecutionSimResult[] }>(
+    `/api/analytics/simulate/${id}/batch?platform=${platform}`
+  );
+  return data.results;
+}
+
+export async function getSpreadHalfLife(
+  id: number
+): Promise<SpreadHalfLifeData> {
+  return fetchJson<SpreadHalfLifeData>(`/api/analytics/half-life/${id}`);
+}
+
+export async function getCalibration(
+  platform = "polymarket"
+): Promise<CalibrationData> {
+  return fetchJson<CalibrationData>(
+    `/api/analytics/calibration?platform=${platform}`
+  );
+}
