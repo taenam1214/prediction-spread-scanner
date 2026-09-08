@@ -101,9 +101,87 @@ export const TOPICS = {
   OPPORTUNITIES: "opportunities",
 } as const;
 
+// --- Analytics Types ---
+
+export interface LeadLagResult {
+  id?: number;
+  marketPairId: number;
+  windowStart: string;
+  windowEnd: string;
+  leader: "polymarket" | "kalshi";
+  lagMs: number;
+  correlation: number;
+  sampleSize: number;
+  computedAt: string;
+}
+
+export interface LiquiditySnapshot {
+  id?: number;
+  marketPairId: number;
+  platform: "polymarket" | "kalshi";
+  spreadBps: number;
+  depthScore: number;
+  liquidityIndex: number;
+  bestBid: number;
+  bestAsk: number;
+  capturedAt: string;
+}
+
+export interface ExecutionSimulationRequest {
+  marketPairId: number;
+  platform: "polymarket" | "kalshi";
+  sizeUsd: number;
+  latencyMs: number;
+}
+
+export interface ExecutionSimulationResult {
+  request: ExecutionSimulationRequest;
+  slippageBps: number;
+  latencyPenaltyBps: number;
+  totalCostBps: number;
+  effectiveSpread: number;
+  profitable: boolean;
+  expectedPnl: number;
+}
+
+export interface SpreadHalfLife {
+  marketPairId: number;
+  halfLifeMs: number;
+  lambda: number;
+  r2: number;
+  sampleSize: number;
+}
+
+export interface CalibrationBucket {
+  bucketStart: number;
+  bucketEnd: number;
+  avgPredicted: number;
+  avgActual: number;
+  count: number;
+}
+
+export interface CalibrationResult {
+  platform: "polymarket" | "kalshi";
+  brierScore: number;
+  buckets: CalibrationBucket[];
+  totalResolved: number;
+}
+
+export interface AnalyticsSummary {
+  totalLeadLagComputations: number;
+  totalLiquiditySnapshots: number;
+  avgCorrelation: number;
+  dominantLeader: "polymarket" | "kalshi" | null;
+  avgLiquidityIndex: number;
+}
+
 // Redis key patterns
 export const REDIS_KEYS = {
   latestPrice: (platform: string, marketPairId: number) =>
     `price:${platform}:${marketPairId}`,
   latestSpread: (marketPairId: number) => `spread:${marketPairId}`,
+  analyticsLeadLag: (marketPairId: number) =>
+    `analytics:lead-lag:${marketPairId}`,
+  analyticsLiquidity: (platform: string, marketPairId: number) =>
+    `analytics:liquidity:${platform}:${marketPairId}`,
 } as const;
