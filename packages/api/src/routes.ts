@@ -5,6 +5,11 @@ import {
   getOpportunities,
   getPriceHistory,
   getResolutions,
+  getLeadLagResults,
+  getLatestLeadLag,
+  getLiquidityHistory,
+  getLatestLiquidityByMarket,
+  getAnalyticsSummary,
 } from "@spread-scanner/db";
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
@@ -123,6 +128,66 @@ export function registerRoutes(app: FastifyInstance): void {
       const threshold = parseFloat(req.query.threshold ?? "0.03");
       const result = await runBacktest(threshold);
       return result;
+    }
+  );
+
+  // --- Analytics Routes ---
+
+  // Analytics summary
+  app.get("/api/analytics/summary", async () => {
+    const summary = await getAnalyticsSummary();
+    return summary;
+  });
+
+  // Lead-lag results (all or filtered by market)
+  app.get<{ Querystring: { limit?: string } }>(
+    "/api/analytics/lead-lag",
+    async (req) => {
+      const limit = parseInt(req.query.limit ?? "50", 10);
+      const results = await getLeadLagResults(undefined, Math.min(limit, 200));
+      return { results };
+    }
+  );
+
+  // Lead-lag results for a specific market
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/api/analytics/lead-lag/:id",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const limit = parseInt(req.query.limit ?? "50", 10);
+      const results = await getLeadLagResults(id, Math.min(limit, 200));
+      const latest = await getLatestLeadLag(id);
+
+      return { marketPairId: id, latest, results };
+    }
+  );
+
+  // Liquidity history for a market
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    "/api/analytics/liquidity/:id",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const limit = parseInt(req.query.limit ?? "200", 10);
+      const history = await getLiquidityHistory(id, Math.min(limit, 1000));
+
+      return { marketPairId: id, history };
+    }
+  );
+
+  // Latest liquidity for a market (one per platform)
+  app.get<{ Params: { id: string } }>(
+    "/api/analytics/liquidity/:id/latest",
+    async (req, reply) => {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return reply.status(400).send({ error: "Invalid market ID" });
+
+      const snapshots = await getLatestLiquidityByMarket(id);
+
+      return { marketPairId: id, snapshots };
     }
   );
 }
