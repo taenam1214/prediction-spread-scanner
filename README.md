@@ -142,6 +142,7 @@ prediction-spread-scanner/
 │   ├── ingestion-kalshi/       # Kalshi Trading API poller → raw-prices topic
 │   ├── normalizer/             # raw-prices → normalized-prices (+ Postgres + Redis)
 │   ├── spread-detector/        # normalized-prices → opportunity detection
+│   ├── analytics/              # Market microstructure analytics engine
 │   ├── api/                    # Fastify REST + WebSocket backend
 │   └── dashboard/              # Next.js frontend
 ├── shared/
@@ -213,6 +214,15 @@ cd packages/dashboard && npm run dev
 | GET | `/api/spreads` | Latest cached spreads |
 | GET | `/api/stats` | System-wide statistics |
 | GET | `/api/backtest` | Run backtest (threshold param) |
+| GET | `/api/analytics/summary` | Analytics engine summary stats |
+| GET | `/api/analytics/lead-lag` | Lead-lag analysis results |
+| GET | `/api/analytics/lead-lag/:id` | Lead-lag for specific market |
+| GET | `/api/analytics/liquidity/:id` | Liquidity history for market |
+| GET | `/api/analytics/liquidity/:id/latest` | Latest liquidity per platform |
+| GET | `/api/analytics/simulate/:id` | Execution cost simulation |
+| GET | `/api/analytics/simulate/:id/batch` | Batch simulation matrix |
+| GET | `/api/analytics/half-life/:id` | Spread half-life computation |
+| GET | `/api/analytics/calibration` | Platform calibration curves |
 | WS | `/ws/spreads` | Real-time spread broadcast |
 
 ---
@@ -229,6 +239,54 @@ cd packages/dashboard && npm run dev
 | Charts | Recharts | Lightweight, composable, works with SSR |
 | Runtime | Node.js 20 (TypeScript) | Shared types across all services |
 | Containers | Docker Compose | One command to run everything locally |
+
+---
+
+## Market Microstructure Analytics
+
+The analytics engine adds domain-specific analysis that goes beyond spread detection — the kind of analysis prediction market platforms run internally.
+
+### Architecture
+
+The analytics service is a Kafka consumer on `normalized-prices` (same topic as spread-detector). It runs two continuous processes:
+
+1. **Liquidity scoring** — on every price event, computes quoted spread (bps), depth score, and liquidity index. Writes to `liquidity_snapshots` table and Redis cache.
+2. **Lead-lag analysis** — every 5 minutes, runs cross-correlation over the last hour of aligned price data for all market pairs. Determines which platform moves first and by how much.
+
+The API serves additional on-demand computations (execution simulation, calibration curves, spread half-life) that query historical data directly.
+
+### Formulas
+
+**Lead-Lag (Cross-Correlation):**
+- Align Polymarket and Kalshi time series onto a 30-second grid
+- Compute normalized cross-correlation R_xy[k] at lags k = -20 to +20
+- Peak |R_xy[k]| determines the leader and lag magnitude
+
+**Liquidity Index:**
+- `spreadBps = (ask - bid) / midpoint × 10,000`
+- `depthScore = 1 - clamp(spreadBps / 500, 0, 1)`
+- `liquidityIndex = depthScore × 100` (0 = illiquid, 100 = very liquid)
+
+**Execution Simulation:**
+- `slippage = halfSpread + 50bps × (size / $1000)`
+- `latencyPenalty = spreadBps × (1 - e^(-latencyMs / 2000))`
+- `totalCost = slippage + latencyPenalty + platformFee`
+
+**Spread Half-Life:**
+- Models spread decay as `spread(t) = spread(0) × e^(-λt)`
+- `halfLife = ln(2) / λ` estimated via OLS on closed opportunity durations
+
+**Calibration (Brier Score):**
+- `brierScore = mean((predicted - actual)²)` across resolved markets
+- Buckets predictions into 10% ranges and compares to actual outcome frequency
+
+### Dashboard Pages
+
+| Page | Path | Description |
+|------|------|-------------|
+| Overview | `/analytics` | Summary stats, lead-lag results table |
+| Execution Simulator | `/analytics/simulation` | Market/platform/size/latency controls, cost breakdown |
+| Calibration Curves | `/analytics/calibration` | Predicted vs actual scatter, Brier score, bucket table |
 
 ---
 
