@@ -9,7 +9,7 @@ import type {
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ??
-    "postgresql://scanner:scanner_dev_pw@localhost:5432/spread_scanner",
+    "postgresql://scanner:scanner_dev_pw@localhost:5433/spread_scanner",
   max: 10,
 });
 

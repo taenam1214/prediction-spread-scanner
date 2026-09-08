@@ -40,7 +40,7 @@ export function loadConfig(): AppConfig {
     database: {
       connectionString:
         process.env.DATABASE_URL ??
-        "postgresql://scanner:scanner_dev_pw@localhost:5432/spread_scanner",
+        "postgresql://scanner:scanner_dev_pw@localhost:5433/spread_scanner",
       maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS ?? "10", 10),
     },
     redis: {
