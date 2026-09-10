@@ -1,10 +1,32 @@
 import { createProducer, ensureTopics, TOPICS } from "@spread-scanner/kafka";
-import { getActiveMarketPairs } from "@spread-scanner/db";
+import { getActiveMarketPairs, pool } from "@spread-scanner/db";
 import type { RawPriceEvent, MarketPair } from "@spread-scanner/schemas";
 import { fetchPolymarketOrderbook } from "./polymarket-client";
 import type { Producer } from "kafkajs";
 
 const POLL_INTERVAL = parseInt(process.env.POLL_INTERVAL_MS ?? "5000", 10);
+
+let shutdownRequested = false;
+
+function setupShutdown(resources: { producer: Producer; intervalIds: NodeJS.Timeout[] }) {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      if (shutdownRequested) return;
+      shutdownRequested = true;
+      console.log(`[polymarket-ingestion] Received ${signal}, shutting down...`);
+      try {
+        for (const id of resources.intervalIds) clearInterval(id);
+        await resources.producer.disconnect();
+        await pool.end();
+        process.exit(0);
+      } catch (err) {
+        console.error("[polymarket-ingestion] Shutdown error:", err);
+        process.exit(1);
+      }
+    });
+  }
+}
 
 async function publishRawEvent(
   producer: Producer,
@@ -64,7 +86,7 @@ async function main(): Promise<void> {
   await pollMarkets(producer, pairs);
 
   // Continuous polling
-  setInterval(async () => {
+  const pollInterval = setInterval(async () => {
     try {
       const currentPairs = await getActiveMarketPairs();
       await pollMarkets(producer, currentPairs);
@@ -72,6 +94,8 @@ async function main(): Promise<void> {
       console.error(`[polymarket-ingestion] Poll cycle error: ${err.message}`);
     }
   }, POLL_INTERVAL);
+
+  setupShutdown({ producer, intervalIds: [pollInterval] });
 }
 
 main().catch((err) => {

@@ -1,5 +1,5 @@
 import { createConsumer, createProducer, ensureTopics, TOPICS } from "@spread-scanner/kafka";
-import { insertOpportunity, closeOpportunity } from "@spread-scanner/db";
+import { insertOpportunity, closeOpportunity, pool } from "@spread-scanner/db";
 import type {
   NormalizedPriceEvent,
   Opportunity,
@@ -11,11 +11,35 @@ import {
   REDIS_KEYS,
 } from "@spread-scanner/schemas";
 import Redis from "ioredis";
+import type { Consumer, Producer } from "kafkajs";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 const SPREAD_THRESHOLD = parseFloat(
   process.env.SPREAD_THRESHOLD ?? `${DEFAULT_SPREAD_THRESHOLD}`
 );
+
+let shutdownRequested = false;
+
+function setupShutdown(resources: { consumer: Consumer; producer: Producer; redis: Redis }) {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      if (shutdownRequested) return;
+      shutdownRequested = true;
+      console.log(`[spread-detector] Received ${signal}, shutting down...`);
+      try {
+        await resources.consumer.disconnect();
+        await resources.producer.disconnect();
+        await resources.redis.quit();
+        await pool.end();
+        process.exit(0);
+      } catch (err) {
+        console.error("[spread-detector] Shutdown error:", err);
+        process.exit(1);
+      }
+    });
+  }
+}
 
 async function main(): Promise<void> {
   console.log("[spread-detector] Starting...");
@@ -26,6 +50,8 @@ async function main(): Promise<void> {
   const consumer = await createConsumer("spread-detector-group", [
     TOPICS.NORMALIZED_PRICES,
   ]);
+
+  setupShutdown({ consumer, producer, redis });
 
   console.log("[spread-detector] Consuming from normalized-prices topic...");
 

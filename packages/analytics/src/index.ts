@@ -5,9 +5,34 @@ import Redis from "ioredis";
 import { processLiquidityEvent } from "./liquidity";
 import { runLeadLagForAllPairs } from "./lead-lag";
 import { incr } from "./metrics";
+import { pool } from "@spread-scanner/db";
+import type { Consumer } from "kafkajs";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
 const LEAD_LAG_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+let shutdownRequested = false;
+
+function setupShutdown(resources: { consumer: Consumer; redis: Redis; intervalIds: NodeJS.Timeout[] }) {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      if (shutdownRequested) return;
+      shutdownRequested = true;
+      console.log(`[analytics] Received ${signal}, shutting down...`);
+      try {
+        for (const id of resources.intervalIds) clearInterval(id);
+        await resources.consumer.disconnect();
+        await resources.redis.quit();
+        await pool.end();
+        process.exit(0);
+      } catch (err) {
+        console.error("[analytics] Shutdown error:", err);
+        process.exit(1);
+      }
+    });
+  }
+}
 
 async function main(): Promise<void> {
   console.log("[analytics] Starting...");
@@ -20,7 +45,7 @@ async function main(): Promise<void> {
   console.log("[analytics] Consuming from normalized-prices topic...");
 
   // Periodic lead-lag computation
-  setInterval(async () => {
+  const leadLagInterval = setInterval(async () => {
     try {
       console.log("[analytics] Running periodic lead-lag analysis...");
       const results = await runLeadLagForAllPairs();
@@ -43,6 +68,8 @@ async function main(): Promise<void> {
       console.error(`[analytics] Lead-lag periodic error: ${err.message}`);
     }
   }, LEAD_LAG_INTERVAL_MS);
+
+  setupShutdown({ consumer, redis, intervalIds: [leadLagInterval] });
 
   await consumer.run({
     eachMessage: async ({ message }) => {

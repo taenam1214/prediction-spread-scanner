@@ -3,6 +3,7 @@ import {
   getActiveMarketPairs,
   getMarketPairByPlatformId,
   insertPriceSnapshot,
+  pool,
 } from "@spread-scanner/db";
 import type {
   RawPriceEvent,
@@ -12,9 +13,33 @@ import type {
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
 import { normalizePolymarket, normalizeKalshi } from "./normalize";
-import type { Producer } from "kafkajs";
+import type { Producer, Consumer } from "kafkajs";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+
+let shutdownRequested = false;
+
+function setupShutdown(resources: { consumer: Consumer; producer: Producer; redis: Redis; intervalIds: NodeJS.Timeout[] }) {
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"];
+  for (const signal of signals) {
+    process.on(signal, async () => {
+      if (shutdownRequested) return;
+      shutdownRequested = true;
+      console.log(`[normalizer] Received ${signal}, shutting down...`);
+      try {
+        for (const id of resources.intervalIds) clearInterval(id);
+        await resources.consumer.disconnect();
+        await resources.producer.disconnect();
+        await resources.redis.quit();
+        await pool.end();
+        process.exit(0);
+      } catch (err) {
+        console.error("[normalizer] Shutdown error:", err);
+        process.exit(1);
+      }
+    });
+  }
+}
 
 async function main(): Promise<void> {
   console.log("[normalizer] Starting...");
@@ -28,10 +53,12 @@ async function main(): Promise<void> {
   const pairsByPlatformId = buildPairIndex(pairsCache);
 
   // Refresh pair cache periodically
-  setInterval(async () => {
+  const refreshInterval = setInterval(async () => {
     pairsCache = await getActiveMarketPairs();
     rebuildPairIndex(pairsByPlatformId, pairsCache);
   }, 60_000);
+
+  setupShutdown({ consumer, producer, redis, intervalIds: [refreshInterval] });
 
   console.log("[normalizer] Consuming from raw-prices topic...");
 
