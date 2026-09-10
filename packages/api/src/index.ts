@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   await app.register(websocket);
 
   registerRoutes(app);
-  startSpreadBroadcast(app);
+  await startSpreadBroadcast(app);
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`[api] Listening on port ${PORT}`);

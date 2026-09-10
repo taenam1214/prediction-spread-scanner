@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getActiveMarketPairs } from "@spread-scanner/db";
+import type { MarketPair } from "@spread-scanner/schemas";
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
 import type { WebSocket } from "ws";
@@ -10,11 +11,26 @@ registerRedis(redis);
 
 const clients = new Set<WebSocket>();
 
+// Cached market pairs — refreshed every 30s instead of querying DB every 2s
+let cachedPairs: MarketPair[] = [];
+const PAIRS_REFRESH_MS = 30_000;
+
+async function refreshPairs(): Promise<void> {
+  cachedPairs = await getActiveMarketPairs();
+}
+
 /**
  * Registers WebSocket endpoint and starts periodic broadcast
  * of latest spread data to all connected dashboard clients.
  */
-export function startSpreadBroadcast(app: FastifyInstance): void {
+export async function startSpreadBroadcast(app: FastifyInstance): Promise<void> {
+  // Initial load
+  await refreshPairs();
+
+  const pairsInterval = setInterval(() => {
+    refreshPairs().catch(err => console.error("[ws] Pair refresh error:", err.message));
+  }, PAIRS_REFRESH_MS);
+
   app.get("/ws/spreads", { websocket: true }, (socket) => {
     clients.add(socket);
     console.log(`[ws] Client connected (total: ${clients.size})`);
@@ -40,7 +56,10 @@ export function startSpreadBroadcast(app: FastifyInstance): void {
     );
   }, 2000);
 
-  registerCleanup(() => clearInterval(broadcastInterval));
+  registerCleanup(() => {
+    clearInterval(pairsInterval);
+    clearInterval(broadcastInterval);
+  });
 }
 
 async function sendSnapshot(socket: WebSocket): Promise<void> {
@@ -63,27 +82,33 @@ async function broadcastToAll(): Promise<void> {
 }
 
 async function buildSnapshot(): Promise<Record<string, unknown>> {
-  const pairs = await getActiveMarketPairs();
-  const spreads = await Promise.all(
-    pairs.map(async (pair) => {
-      const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
-      const polyStr = await redis.get(
-        REDIS_KEYS.latestPrice("polymarket", pair.id)
-      );
-      const kalshiStr = await redis.get(
-        REDIS_KEYS.latestPrice("kalshi", pair.id)
-      );
+  const pairs = cachedPairs;
 
-      return {
-        marketPairId: pair.id,
-        label: pair.label,
-        category: pair.category,
-        spread: spreadStr ? JSON.parse(spreadStr) : null,
-        polymarketPrice: polyStr ? JSON.parse(polyStr) : null,
-        kalshiPrice: kalshiStr ? JSON.parse(kalshiStr) : null,
-      };
-    })
-  );
+  if (pairs.length === 0) {
+    return { type: "spread_update", timestamp: new Date().toISOString(), spreads: [] };
+  }
+
+  // Batch fetch all Redis keys in one round-trip
+  const keys = pairs.flatMap(pair => [
+    REDIS_KEYS.latestSpread(pair.id),
+    REDIS_KEYS.latestPrice("polymarket", pair.id),
+    REDIS_KEYS.latestPrice("kalshi", pair.id),
+  ]);
+  const values = await redis.mget(...keys);
+
+  const spreads = pairs.map((pair, i) => {
+    const spreadStr = values[i * 3];
+    const polyStr = values[i * 3 + 1];
+    const kalshiStr = values[i * 3 + 2];
+    return {
+      marketPairId: pair.id,
+      label: pair.label,
+      category: pair.category,
+      spread: spreadStr ? JSON.parse(spreadStr) : null,
+      polymarketPrice: polyStr ? JSON.parse(polyStr) : null,
+      kalshiPrice: kalshiStr ? JSON.parse(kalshiStr) : null,
+    };
+  });
 
   return { type: "spread_update", timestamp: new Date().toISOString(), spreads };
 }
