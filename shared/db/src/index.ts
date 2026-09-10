@@ -9,11 +9,18 @@ import type {
   AnalyticsSummary,
 } from "@spread-scanner/schemas";
 
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error("[db] DATABASE_URL is required");
+  process.exit(1);
+}
+
 const pool = new Pool({
-  connectionString:
-    process.env.DATABASE_URL ??
-    "postgresql://scanner:scanner_dev_pw@localhost:5433/spread_scanner",
+  connectionString,
   max: 10,
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 10_000,
+  statement_timeout: 30_000,
 });
 
 export { pool };
