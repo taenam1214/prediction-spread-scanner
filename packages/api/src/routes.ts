@@ -17,8 +17,10 @@ import { runBacktest } from "./backtest";
 import { getSystemStats } from "./stats";
 import { runSimulation, runBatchSimulation } from "./execution-sim";
 import { computeSpreadHalfLife, computeCalibration } from "./efficiency";
+import { registerRedis } from "./graceful-shutdown";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+registerRedis(redis);
 
 export function registerRoutes(app: FastifyInstance): void {
   // Health check

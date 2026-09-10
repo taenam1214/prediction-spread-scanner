@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { registerRoutes } from "./routes";
 import { startSpreadBroadcast } from "./ws";
+import { setupGracefulShutdown } from "./graceful-shutdown";
 
 const PORT = parseInt(process.env.PORT ?? "3001", 10);
 
@@ -21,6 +22,8 @@ async function main(): Promise<void> {
 
   await app.listen({ port: PORT, host: "0.0.0.0" });
   console.log(`[api] Listening on port ${PORT}`);
+
+  setupGracefulShutdown(app);
 }
 
 main().catch((err) => {

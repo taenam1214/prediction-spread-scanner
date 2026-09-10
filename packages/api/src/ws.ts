@@ -3,8 +3,10 @@ import { getActiveMarketPairs } from "@spread-scanner/db";
 import { REDIS_KEYS } from "@spread-scanner/schemas";
 import Redis from "ioredis";
 import type { WebSocket } from "ws";
+import { registerRedis, registerCleanup } from "./graceful-shutdown";
 
 const redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379");
+registerRedis(redis);
 
 const clients = new Set<WebSocket>();
 
@@ -31,12 +33,14 @@ export function startSpreadBroadcast(app: FastifyInstance): void {
   });
 
   // Broadcast every 2 seconds
-  setInterval(() => {
+  const broadcastInterval = setInterval(() => {
     if (clients.size === 0) return;
     broadcastToAll().catch((err) =>
       console.error("[ws] Broadcast error:", err.message)
     );
   }, 2000);
+
+  registerCleanup(() => clearInterval(broadcastInterval));
 }
 
 async function sendSnapshot(socket: WebSocket): Promise<void> {
