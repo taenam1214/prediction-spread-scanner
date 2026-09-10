@@ -128,11 +128,12 @@ export function registerRoutes(app: FastifyInstance): void {
   });
 
   // Run backtest
-  app.get<{ Querystring: { threshold?: string } }>(
+  app.get<{ Querystring: { threshold?: string; maxRows?: string } }>(
     "/api/backtest",
     async (req) => {
       const threshold = parseFloat(req.query.threshold ?? "0.03");
-      const result = await runBacktest(threshold);
+      const maxRows = Math.min(parseInt(req.query.maxRows ?? "10000", 10) || 10_000, 50_000);
+      const result = await runBacktest(threshold, maxRows);
       return result;
     }
   );

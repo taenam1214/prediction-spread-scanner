@@ -13,15 +13,16 @@ import type { BacktestResult, BacktestEntry } from "@spread-scanner/schemas";
  * (opportunity closed), treating convergence as a "win" (the position
  * could have been closed at a profit as the prices converged).
  */
-export async function runBacktest(threshold: number): Promise<BacktestResult> {
-  // Get all opportunities above threshold
+export async function runBacktest(threshold: number, maxRows = 10_000): Promise<BacktestResult> {
+  // Get opportunities above threshold (capped to prevent OOM)
   const { rows: opportunities } = await pool.query(
     `SELECT o.*, mp.label
      FROM opportunities o
      JOIN market_pairs mp ON mp.id = o.market_pair_id
      WHERE o.fee_adjusted_spread >= $1
-     ORDER BY o.detected_at ASC`,
-    [threshold]
+     ORDER BY o.detected_at ASC
+     LIMIT $2`,
+    [threshold, maxRows]
   );
 
   // Get all resolutions
