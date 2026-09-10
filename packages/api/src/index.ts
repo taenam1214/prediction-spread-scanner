@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const app = Fastify({ logger: true });
 
   await app.register(cors, {
-    origin: true,
+    origin: process.env.CORS_ORIGIN ?? "http://localhost:3000",
     credentials: true,
   });
 
