@@ -30,27 +30,27 @@ export function registerRoutes(app: FastifyInstance): void {
   app.get("/api/markets", async () => {
     const pairs = await getActiveMarketPairs();
 
-    // Enrich with latest spread from Redis
-    const enriched = await Promise.all(
-      pairs.map(async (pair) => {
-        const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
-        const latestSpread = spreadStr ? JSON.parse(spreadStr) : null;
+    if (pairs.length === 0) return { markets: [] };
 
-        const polyStr = await redis.get(
-          REDIS_KEYS.latestPrice("polymarket", pair.id)
-        );
-        const kalshiStr = await redis.get(
-          REDIS_KEYS.latestPrice("kalshi", pair.id)
-        );
+    // Batch fetch all Redis keys in one round-trip
+    const keys = pairs.flatMap(pair => [
+      REDIS_KEYS.latestSpread(pair.id),
+      REDIS_KEYS.latestPrice("polymarket", pair.id),
+      REDIS_KEYS.latestPrice("kalshi", pair.id),
+    ]);
+    const values = await redis.mget(...keys);
 
-        return {
-          ...pair,
-          latestSpread,
-          polymarketPrice: polyStr ? JSON.parse(polyStr) : null,
-          kalshiPrice: kalshiStr ? JSON.parse(kalshiStr) : null,
-        };
-      })
-    );
+    const enriched = pairs.map((pair, i) => {
+      const spreadStr = values[i * 3];
+      const polyStr = values[i * 3 + 1];
+      const kalshiStr = values[i * 3 + 2];
+      return {
+        ...pair,
+        latestSpread: spreadStr ? JSON.parse(spreadStr) : null,
+        polymarketPrice: polyStr ? JSON.parse(polyStr) : null,
+        kalshiPrice: kalshiStr ? JSON.parse(kalshiStr) : null,
+      };
+    });
 
     return { markets: enriched };
   });
@@ -106,17 +106,19 @@ export function registerRoutes(app: FastifyInstance): void {
   // Get latest spreads for all markets (from Redis cache)
   app.get("/api/spreads", async () => {
     const pairs = await getActiveMarketPairs();
-    const spreads = await Promise.all(
-      pairs.map(async (pair) => {
-        const spreadStr = await redis.get(REDIS_KEYS.latestSpread(pair.id));
-        return {
-          marketPairId: pair.id,
-          label: pair.label,
-          category: pair.category,
-          spread: spreadStr ? JSON.parse(spreadStr) : null,
-        };
-      })
-    );
+
+    if (pairs.length === 0) return { spreads: [] };
+
+    const keys = pairs.map(pair => REDIS_KEYS.latestSpread(pair.id));
+    const values = await redis.mget(...keys);
+
+    const spreads = pairs.map((pair, i) => ({
+      marketPairId: pair.id,
+      label: pair.label,
+      category: pair.category,
+      spread: values[i] ? JSON.parse(values[i]!) : null,
+    }));
+
     return { spreads };
   });
 
