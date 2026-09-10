@@ -75,11 +75,11 @@ async function main(): Promise<void> {
     eachMessage: async ({ message }) => {
       if (!message.value) return;
 
-      const event: NormalizedPriceEvent & { marketPairId: number } = JSON.parse(
-        message.value.toString()
-      );
-
       try {
+        const event: NormalizedPriceEvent & { marketPairId: number } = JSON.parse(
+          message.value.toString()
+        );
+
         incr("eventsProcessed");
 
         // Process liquidity event and cache
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
       } catch (err: any) {
         incr("errors");
         console.error(
-          `[analytics] Error processing market ${event.marketPairId}: ${err.message}`
+          `[analytics] Error processing message: ${err.message}`
         );
       }
     },

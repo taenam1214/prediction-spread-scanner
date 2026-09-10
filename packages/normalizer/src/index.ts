@@ -66,17 +66,17 @@ async function main(): Promise<void> {
     eachMessage: async ({ message }) => {
       if (!message.value) return;
 
-      const raw: RawPriceEvent = JSON.parse(message.value.toString());
-      const pair = pairsByPlatformId.get(
-        `${raw.platform}:${raw.platformMarketId}`
-      );
-
-      if (!pair) {
-        // Unknown market — not in our pair mapping
-        return;
-      }
-
       try {
+        const raw: RawPriceEvent = JSON.parse(message.value.toString());
+        const pair = pairsByPlatformId.get(
+          `${raw.platform}:${raw.platformMarketId}`
+        );
+
+        if (!pair) {
+          // Unknown market — not in our pair mapping
+          return;
+        }
+
         const normalized = normalize(raw, pair);
         if (!normalized) return;
 
@@ -106,7 +106,7 @@ async function main(): Promise<void> {
         });
       } catch (err: any) {
         console.error(
-          `[normalizer] Error processing ${raw.platform}:${raw.platformMarketId}: ${err.message}`
+          `[normalizer] Error processing message: ${err.message}`
         );
       }
     },

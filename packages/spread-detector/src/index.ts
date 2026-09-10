@@ -59,15 +59,14 @@ async function main(): Promise<void> {
     eachMessage: async ({ message }) => {
       if (!message.value) return;
 
-      const event: NormalizedPriceEvent & { marketPairId: number } = JSON.parse(
-        message.value.toString()
-      );
-
       try {
+        const event: NormalizedPriceEvent & { marketPairId: number } = JSON.parse(
+          message.value.toString()
+        );
         await detectSpread(event, producer);
       } catch (err: any) {
         console.error(
-          `[spread-detector] Error processing market ${event.marketPairId}: ${err.message}`
+          `[spread-detector] Error processing message: ${err.message}`
         );
       }
     },
@@ -91,7 +90,13 @@ async function detectSpread(
     return;
   }
 
-  const otherEvent: NormalizedPriceEvent = JSON.parse(cachedStr);
+  let otherEvent: NormalizedPriceEvent;
+  try {
+    otherEvent = JSON.parse(cachedStr);
+  } catch {
+    console.error(`[spread-detector] Corrupt Redis cache for ${otherPlatform}:${marketPairId}`);
+    return;
+  }
 
   // Compute raw spread
   const polyProb =
